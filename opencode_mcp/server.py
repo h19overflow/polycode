@@ -13,10 +13,13 @@ from opencode_mcp.errors import OpencodeError, format_error
 from opencode_mcp.session_manager import SessionManager
 from opencode_mcp.tools import (
     handle_end_session,
+    handle_gemini_check_auth,
+    handle_gemini_list_sessions,
     handle_gemini_prompt,
     handle_get_history,
     handle_list_models,
     handle_list_sessions,
+    handle_qwen_check_auth,
     handle_qwen_prompt,
     handle_send_message,
     handle_set_model,
@@ -158,20 +161,59 @@ async def opencode_set_model(
 
 
 @mcp.tool()
+async def gemini_check_auth(
+    timeout_seconds: int = Field(default=15, description="Seconds to wait for the auth probe"),
+) -> dict[str, Any]:
+    """Check whether the Gemini CLI is authenticated. Returns authenticated status, method, and any error detail."""
+    try:
+        return await handle_gemini_check_auth(timeout_seconds=timeout_seconds)
+    except OpencodeError as err:
+        return _wrap_error(err)
+
+
+@mcp.tool()
 async def gemini_prompt(
     prompt: str = Field(description="The prompt to send to Gemini CLI"),
-    model: str = Field(default="", description="Gemini model to use, e.g. 'gemini-2.5-flash'. Defaults to the CLI's configured model."),
+    session_id: str = Field(default="", description="Resume a previous Gemini session by its ID. Leave empty to start a new session."),
+    model: str = Field(default="", description="Gemini model, e.g. 'gemini-2.5-flash'. Defaults to the CLI's configured model."),
     timeout_seconds: int = Field(default=120, description="Seconds to wait for a response"),
     project_dir: str = Field(default="", description="Working directory for the CLI. Defaults to current directory."),
 ) -> dict[str, Any]:
-    """Send a one-shot prompt to the Gemini CLI and return the response. Requires gemini CLI installed and GEMINI_API_KEY set."""
+    """Send a prompt to Gemini CLI. Returns response, model used, and session_id. Pass session_id to continue a conversation."""
     try:
         return await handle_gemini_prompt(
             prompt=prompt,
             model=model or None,
             timeout_seconds=timeout_seconds,
             project_dir=project_dir or None,
+            session_id=session_id or None,
         )
+    except OpencodeError as err:
+        return _wrap_error(err)
+
+
+@mcp.tool()
+async def gemini_list_sessions(
+    project_dir: str = Field(default="", description="Project directory to list sessions for. Defaults to current directory."),
+    timeout_seconds: int = Field(default=10, description="Seconds to wait"),
+) -> dict[str, Any]:
+    """List saved Gemini CLI sessions for the current project."""
+    try:
+        return await handle_gemini_list_sessions(
+            project_dir=project_dir or None,
+            timeout_seconds=timeout_seconds,
+        )
+    except OpencodeError as err:
+        return _wrap_error(err)
+
+
+@mcp.tool()
+async def qwen_check_auth(
+    timeout_seconds: int = Field(default=15, description="Seconds to wait for the auth check"),
+) -> dict[str, Any]:
+    """Check whether the Qwen Code CLI is authenticated. Returns authenticated status, method, and any error detail."""
+    try:
+        return await handle_qwen_check_auth(timeout_seconds=timeout_seconds)
     except OpencodeError as err:
         return _wrap_error(err)
 
@@ -179,17 +221,19 @@ async def gemini_prompt(
 @mcp.tool()
 async def qwen_prompt(
     prompt: str = Field(description="The prompt to send to Qwen Code CLI"),
-    model: str = Field(default="", description="Qwen model to use, e.g. 'qwen-plus'. Defaults to the CLI's configured model."),
+    session_id: str = Field(default="", description="Resume a previous Qwen session by its ID. Leave empty to start a new session."),
+    model: str = Field(default="", description="Qwen model, e.g. 'qwen-plus'. Defaults to the CLI's configured model."),
     timeout_seconds: int = Field(default=120, description="Seconds to wait for a response"),
     project_dir: str = Field(default="", description="Working directory for the CLI. Defaults to current directory."),
 ) -> dict[str, Any]:
-    """Send a one-shot prompt to the Qwen Code CLI and return the response. Requires qwen CLI installed and DASHSCOPE_API_KEY set."""
+    """Send a prompt to Qwen Code CLI. Returns response, model used, and session_id. Pass session_id to continue a conversation."""
     try:
         return await handle_qwen_prompt(
             prompt=prompt,
             model=model or None,
             timeout_seconds=timeout_seconds,
             project_dir=project_dir or None,
+            session_id=session_id or None,
         )
     except OpencodeError as err:
         return _wrap_error(err)

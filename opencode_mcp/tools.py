@@ -6,13 +6,23 @@ from typing import Any
 
 from opencode_mcp.core.client import OpencodeClient
 from opencode_mcp.core.process import OpencodeProcess
-from opencode_mcp.helpers.cli_runner import run_gemini_prompt, run_qwen_prompt
+from opencode_mcp.helpers.cli_runner import (
+    check_gemini_auth,
+    check_qwen_auth,
+    list_gemini_sessions,
+    run_gemini_prompt,
+    run_qwen_prompt,
+)
 from opencode_mcp.helpers.models import list_all_models
 from opencode_mcp.helpers.validation import validate_model_format
 from opencode_mcp.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# opencode session tools
+# ---------------------------------------------------------------------------
 
 async def handle_start_session(
     project_dir: str,
@@ -84,32 +94,6 @@ async def handle_set_model(model: str, state: dict[str, Any]) -> dict[str, Any]:
     return {"previous_model": previous, "new_model": model}
 
 
-async def handle_gemini_prompt(
-    prompt: str,
-    model: str | None,
-    timeout_seconds: int,
-    project_dir: str | None,
-) -> dict[str, Any]:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None,
-        lambda: run_gemini_prompt(prompt, model, float(timeout_seconds), project_dir),
-    )
-
-
-async def handle_qwen_prompt(
-    prompt: str,
-    model: str | None,
-    timeout_seconds: int,
-    project_dir: str | None,
-) -> dict[str, Any]:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None,
-        lambda: run_qwen_prompt(prompt, model, float(timeout_seconds), project_dir),
-    )
-
-
 async def handle_shutdown(
     session_manager: SessionManager,
     process: OpencodeProcess,
@@ -118,3 +102,67 @@ async def handle_shutdown(
     await process.stop()
     logger.info("opencode server stopped. %d sessions closed.", sessions_closed)
     return {"stopped": True, "sessions_closed": sessions_closed}
+
+
+# ---------------------------------------------------------------------------
+# Gemini CLI tools
+# ---------------------------------------------------------------------------
+
+async def handle_gemini_prompt(
+    prompt: str,
+    model: str | None,
+    timeout_seconds: int,
+    project_dir: str | None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: run_gemini_prompt(prompt, model, float(timeout_seconds), project_dir, session_id),
+    )
+
+
+async def handle_gemini_check_auth(timeout_seconds: int) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: check_gemini_auth(float(timeout_seconds)),
+    )
+
+
+async def handle_gemini_list_sessions(
+    project_dir: str | None,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    sessions = await loop.run_in_executor(
+        None,
+        lambda: list_gemini_sessions(project_dir, float(timeout_seconds)),
+    )
+    return {"sessions": sessions}
+
+
+# ---------------------------------------------------------------------------
+# Qwen CLI tools
+# ---------------------------------------------------------------------------
+
+async def handle_qwen_prompt(
+    prompt: str,
+    model: str | None,
+    timeout_seconds: int,
+    project_dir: str | None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: run_qwen_prompt(prompt, model, float(timeout_seconds), project_dir, session_id),
+    )
+
+
+async def handle_qwen_check_auth(timeout_seconds: int) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: check_qwen_auth(float(timeout_seconds)),
+    )
