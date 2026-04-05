@@ -66,12 +66,38 @@ def _wrap_error(err: OpencodeError) -> dict[str, Any]:
     return dict(format_error(err))
 
 
+# ---------------------------------------------------------------------------
+# opencode tools
+# ---------------------------------------------------------------------------
+
 @mcp.tool()
 async def opencode_start_session(
-    project_dir: str = Field(default="", description="Absolute path to the project directory. Defaults to current working directory."),
-    model: str = Field(default="", description="Model in 'provider/model' format. Defaults to OPENCODE_DEFAULT_MODEL."),
+    project_dir: str = Field(
+        default="",
+        description=(
+            "Absolute path to the project directory the agent will work in. "
+            "Example: 'C:/Users/User/projects/myapp'. "
+            "Defaults to current working directory if omitted."
+        ),
+    ),
+    model: str = Field(
+        default="",
+        description=(
+            "Model in 'provider/model' format. "
+            "Call opencode_list_models to see all available models. "
+            "Defaults to OPENCODE_DEFAULT_MODEL env var if omitted."
+        ),
+    ),
 ) -> dict[str, Any]:
-    """Start a new opencode session. Returns session_id for use in subsequent calls."""
+    """
+    Start a new opencode session. Call this before opencode_send_message.
+
+    Returns session_id, model, and project_dir. Store session_id — every subsequent
+    call to opencode_send_message requires it.
+
+    Use opencode for coding tasks: writing, editing, refactoring, debugging, explaining code.
+    For tasks requiring reasoning or research, prefer gemini_prompt or qwen_prompt instead.
+    """
     if not project_dir:
         project_dir = os.getcwd()
     if not model:
@@ -93,11 +119,41 @@ async def opencode_start_session(
 
 @mcp.tool()
 async def opencode_send_message(
-    session_id: str = Field(description="Session ID from opencode_start_session"),
-    message: str = Field(description="The prompt or message to send"),
-    timeout_seconds: int = Field(default=int(REQUEST_TIMEOUT), description="Seconds to wait for a response"),
+    session_id: str = Field(
+        description="Session ID returned by opencode_start_session.",
+    ),
+    message: str = Field(
+        description=(
+            "The full, detailed instruction for opencode. "
+            "ALWAYS include: (1) exact file paths for every file to read or modify, "
+            "(2) step-by-step instructions — one action per step, "
+            "(3) expected output format or file structure. "
+            "Vague prompts produce vague results. "
+            "Example of a GOOD prompt: "
+            "'Read C:/projects/app/src/auth.py. "
+            "Add a function validate_token(token: str) -> bool that checks the JWT expiry. "
+            "Write the result back to the same file. "
+            "Return the full updated function as a code block.' "
+            "Example of a BAD prompt: 'Fix the auth module.'"
+        ),
+    ),
+    timeout_seconds: int = Field(
+        default=int(REQUEST_TIMEOUT),
+        description="Seconds to wait for a response. Increase for long code generation tasks.",
+    ),
 ) -> dict[str, Any]:
-    """Send a message to an existing opencode session and return the response."""
+    """
+    Send a detailed instruction to an active opencode session and return the response.
+
+    PROMPTING RULES — always follow these when constructing the message:
+    - Specify EXACT file paths (absolute). Never say 'the config file' — say the full path.
+    - Break multi-step work into numbered steps within the same message.
+    - Specify the output format: 'return a code block', 'return JSON', 'list changed files'.
+    - If the task involves multiple files, list all of them explicitly.
+    - If you want opencode to run a command, say exactly which command and in which directory.
+
+    Returns: response text, session_id, message_index, partial flag.
+    """
     try:
         return await handle_send_message(
             session_id=session_id,
@@ -112,9 +168,14 @@ async def opencode_send_message(
 
 @mcp.tool()
 async def opencode_get_history(
-    session_id: str = Field(description="Session ID to retrieve history for"),
+    session_id: str = Field(description="Session ID to retrieve history for."),
 ) -> dict[str, Any]:
-    """Return the full message history for a session."""
+    """
+    Return the full message history for an opencode session (tracked in-process).
+
+    Each message has: role (user/assistant), content, timestamp.
+    Use this to review what has been sent and received in a session before sending the next message.
+    """
     try:
         return await handle_get_history(session_id=session_id, session_manager=_session_manager)
     except OpencodeError as err:
@@ -123,15 +184,24 @@ async def opencode_get_history(
 
 @mcp.tool()
 async def opencode_list_sessions() -> dict[str, Any]:
-    """List all active opencode sessions."""
+    """
+    List all currently active opencode sessions with their session_id, model, project_dir,
+    message count, and creation time.
+
+    Use this to find a session_id if you have lost track of it.
+    """
     return await handle_list_sessions(session_manager=_session_manager)
 
 
 @mcp.tool()
 async def opencode_end_session(
-    session_id: str = Field(description="Session ID to close"),
+    session_id: str = Field(description="Session ID to close."),
 ) -> dict[str, Any]:
-    """Close an opencode session and free its resources."""
+    """
+    Close an opencode session and free its resources.
+
+    Call this when a task is complete. Do not leave sessions open indefinitely.
+    """
     try:
         return await handle_end_session(session_id=session_id, session_manager=_session_manager)
     except OpencodeError as err:
@@ -140,7 +210,14 @@ async def opencode_end_session(
 
 @mcp.tool()
 async def opencode_list_models() -> dict[str, Any]:
-    """List all models available in opencode, grouped by provider. Only authenticated/connected providers will show models."""
+    """
+    List all models available in opencode across all connected providers, grouped by provider.
+
+    Only providers you are authenticated with will return models.
+    Returns: models (flat list), by_provider (grouped dict), total count, default_model.
+
+    Use this before opencode_start_session to pick the right model for the task.
+    """
     try:
         result = await handle_list_models()
         result["default_model"] = _state["default_model"]
@@ -151,20 +228,67 @@ async def opencode_list_models() -> dict[str, Any]:
 
 @mcp.tool()
 async def opencode_set_model(
-    model: str = Field(description="Model in 'provider/model' format, e.g. 'ollama/qwen3.5:cloud'"),
+    model: str = Field(
+        description=(
+            "Model in 'provider/model' format. "
+            "Call opencode_list_models to see valid options. "
+            "Example: 'ollama/qwen3.5:cloud', 'openai/gpt-4o', 'google/gemini-2.5-flash'."
+        ),
+    ),
 ) -> dict[str, Any]:
-    """Change the default model used for new sessions."""
+    """
+    Change the default model used for all new opencode sessions.
+
+    Takes effect immediately for all subsequent opencode_start_session calls.
+    Does not affect already-open sessions.
+    """
     try:
         return await handle_set_model(model=model, state=_state)
     except OpencodeError as err:
         return _wrap_error(err)
 
 
+# ---------------------------------------------------------------------------
+# Gemini CLI tools
+# ---------------------------------------------------------------------------
+#
+# MODEL ROUTING GUIDE — choose the right Gemini model for the job:
+#
+#   gemini-3-flash-preview    DEFAULT — fast, capable, handles most tasks well.
+#                             Use for: standard Q&A, code review, summaries,
+#                             writing, single-file edits, straightforward tasks.
+#
+#   gemini-3.1-pro-preview    COMPLEX — deepest reasoning, best for hard problems.
+#                             Use for: architecture design, multi-file refactors,
+#                             debugging subtle bugs, long-form analysis, tasks
+#                             where quality matters more than speed.
+#
+#   gemini-2.5-flash-lite     BULK — fastest and cheapest, good for high volume.
+#                             Use for: batch processing, repetitive tasks, simple
+#                             lookups, classification, tasks run in a loop.
+#
+# PROMPTING RULES (apply to every gemini_prompt call):
+#   1. Be specific — include file paths, function names, class names.
+#   2. Number your steps — "Step 1: ..., Step 2: ..." for multi-step tasks.
+#   3. State the output format — "return JSON", "return a code block", "list each item".
+#   4. Include context — paste the relevant code or error message directly in the prompt.
+#   5. Never ask Gemini to "fix it" without explaining what "it" means in full detail.
+# ---------------------------------------------------------------------------
+
 @mcp.tool()
 async def gemini_check_auth(
-    timeout_seconds: int = Field(default=15, description="Seconds to wait for the auth probe"),
+    timeout_seconds: int = Field(
+        default=15,
+        description="Seconds to wait for the auth probe. Increase if the CLI is slow to start.",
+    ),
 ) -> dict[str, Any]:
-    """Check whether the Gemini CLI is authenticated. Returns authenticated status, method, and any error detail."""
+    """
+    Check whether the Gemini CLI is authenticated before making any gemini_prompt calls.
+
+    Always call this first if you are unsure whether Gemini is set up.
+    Returns: authenticated (bool), method, detail, suggestion.
+    If authenticated is false, read the suggestion field — it contains the exact fix.
+    """
     try:
         return await handle_gemini_check_auth(timeout_seconds=timeout_seconds)
     except OpencodeError as err:
@@ -173,13 +297,75 @@ async def gemini_check_auth(
 
 @mcp.tool()
 async def gemini_prompt(
-    prompt: str = Field(description="The prompt to send to Gemini CLI"),
-    session_id: str = Field(default="", description="Resume a previous Gemini session by its ID. Leave empty to start a new session."),
-    model: str = Field(default="", description="Gemini model, e.g. 'gemini-2.5-flash'. Defaults to the CLI's configured model."),
-    timeout_seconds: int = Field(default=120, description="Seconds to wait for a response"),
-    project_dir: str = Field(default="", description="Working directory for the CLI. Defaults to current directory."),
+    prompt: str = Field(
+        description=(
+            "The full, detailed prompt for Gemini. "
+            "ALWAYS write prompts in detail — never vague. Rules: "
+            "(1) Include exact file paths for any files involved. "
+            "(2) Number each step when asking for multi-step work. "
+            "(3) Specify the exact output format: 'return a JSON object with keys X, Y, Z', "
+            "'return a markdown table', 'return only the fixed code block'. "
+            "(4) Paste the relevant code, error message, or data directly into the prompt — "
+            "do not say 'the error' without including it. "
+            "Example GOOD prompt: "
+            "'Review the following Python function and identify any bugs. "
+            "Return a JSON array where each item has fields: line (int), issue (str), fix (str). "
+            "Function: def calc(x, y): return x / y' "
+            "Example BAD prompt: 'Review my function.'"
+        ),
+    ),
+    session_id: str = Field(
+        default="",
+        description=(
+            "Resume a previous Gemini session by its ID (from a prior gemini_prompt response). "
+            "Leave empty to start a fresh session. "
+            "Pass the same session_id on every subsequent turn of a multi-turn conversation."
+        ),
+    ),
+    model: str = Field(
+        default="gemini-3-flash-preview",
+        description=(
+            "Gemini model to use. Choose based on task complexity: "
+            "'gemini-3-flash-preview' — DEFAULT. Fast and capable. Use for most tasks: "
+            "standard Q&A, code review, summaries, single-file edits, writing. "
+            "'gemini-3.1-pro-preview' — COMPLEX tasks requiring deep reasoning: "
+            "architecture design, multi-file refactors, subtle bug analysis, long-form analysis. "
+            "'gemini-2.5-flash-lite' — BULK tasks: batch processing, repetitive lookups, "
+            "classification, tasks run in a loop where speed and cost matter most. "
+            "Other valid values: 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-3.1-flash-lite-preview'."
+        ),
+    ),
+    timeout_seconds: int = Field(
+        default=120,
+        description=(
+            "Seconds to wait for a response. "
+            "Increase to 300 for gemini-3.1-pro-preview on complex tasks."
+        ),
+    ),
+    project_dir: str = Field(
+        default="",
+        description=(
+            "Absolute path to the working directory for this call. "
+            "Set this when your prompt references files in a specific project. "
+            "Example: 'C:/Users/User/projects/myapp'. Defaults to current directory."
+        ),
+    ),
 ) -> dict[str, Any]:
-    """Send a prompt to Gemini CLI. Returns response, model used, and session_id. Pass session_id to continue a conversation."""
+    """
+    Send a detailed prompt to the Gemini CLI. Returns response text, model used, and session_id.
+
+    MODEL SELECTION:
+      - Default work      → gemini-3-flash-preview    (fast, capable, most tasks)
+      - Complex work      → gemini-3.1-pro-preview    (deep reasoning, architecture, hard bugs)
+      - Bulk/batch work   → gemini-2.5-flash-lite     (fastest, cheapest, high-volume tasks)
+
+    SESSION CONTINUITY:
+      First call returns a session_id. Pass it back on the next call to continue the conversation.
+      Gemini persists session history to disk — context is preserved across calls.
+
+    ALWAYS write detailed prompts. Include file paths, numbered steps, and output format.
+    Vague prompts produce vague results.
+    """
     try:
         return await handle_gemini_prompt(
             prompt=prompt,
@@ -194,10 +380,18 @@ async def gemini_prompt(
 
 @mcp.tool()
 async def gemini_list_sessions(
-    project_dir: str = Field(default="", description="Project directory to list sessions for. Defaults to current directory."),
-    timeout_seconds: int = Field(default=10, description="Seconds to wait"),
+    project_dir: str = Field(
+        default="",
+        description="Absolute path to the project directory. Defaults to current directory.",
+    ),
+    timeout_seconds: int = Field(default=10, description="Seconds to wait."),
 ) -> dict[str, Any]:
-    """List saved Gemini CLI sessions for the current project."""
+    """
+    List saved Gemini CLI sessions for the current project.
+
+    Returns a list of sessions with their index and first-message preview.
+    Use this to find a session_id to resume a previous conversation.
+    """
     try:
         return await handle_gemini_list_sessions(
             project_dir=project_dir or None,
@@ -207,11 +401,37 @@ async def gemini_list_sessions(
         return _wrap_error(err)
 
 
+# ---------------------------------------------------------------------------
+# Qwen Code CLI tools
+# ---------------------------------------------------------------------------
+#
+# MODEL ROUTING GUIDE:
+#   Pass model= to qwen_prompt to select the model. Available models depend on
+#   your Qwen auth tier. With the free OAuth tier, the CLI uses the default
+#   'coder-model' automatically.
+#
+# PROMPTING RULES (same as Gemini — apply to every qwen_prompt call):
+#   1. Be specific — include file paths, function names, class names.
+#   2. Number your steps for multi-step tasks.
+#   3. State the output format explicitly.
+#   4. Include the relevant code or error message directly in the prompt.
+#   5. Never ask Qwen to "fix it" without full context.
+# ---------------------------------------------------------------------------
+
 @mcp.tool()
 async def qwen_check_auth(
-    timeout_seconds: int = Field(default=15, description="Seconds to wait for the auth check"),
+    timeout_seconds: int = Field(
+        default=15,
+        description="Seconds to wait for the auth check.",
+    ),
 ) -> dict[str, Any]:
-    """Check whether the Qwen Code CLI is authenticated. Returns authenticated status, method, and any error detail."""
+    """
+    Check whether the Qwen Code CLI is authenticated before making any qwen_prompt calls.
+
+    Always call this first if you are unsure whether Qwen is set up.
+    Returns: authenticated (bool), method (qwen-oauth / coding-plan / api-key), detail, suggestion.
+    If authenticated is false, read the suggestion field — it contains the exact command to run.
+    """
     try:
         return await handle_qwen_check_auth(timeout_seconds=timeout_seconds)
     except OpencodeError as err:
@@ -220,13 +440,68 @@ async def qwen_check_auth(
 
 @mcp.tool()
 async def qwen_prompt(
-    prompt: str = Field(description="The prompt to send to Qwen Code CLI"),
-    session_id: str = Field(default="", description="Resume a previous Qwen session by its ID. Leave empty to start a new session."),
-    model: str = Field(default="", description="Qwen model, e.g. 'qwen-plus'. Defaults to the CLI's configured model."),
-    timeout_seconds: int = Field(default=120, description="Seconds to wait for a response"),
-    project_dir: str = Field(default="", description="Working directory for the CLI. Defaults to current directory."),
+    prompt: str = Field(
+        description=(
+            "The full, detailed prompt for Qwen Code. "
+            "ALWAYS write prompts in detail — never vague. Rules: "
+            "(1) Include exact file paths for any files involved. "
+            "(2) Number each step when asking for multi-step work. "
+            "(3) Specify the exact output format: 'return a JSON object', "
+            "'return only the modified function as a code block', 'list changed files'. "
+            "(4) Paste the relevant code, error message, or data directly into the prompt. "
+            "Example GOOD prompt: "
+            "'Read C:/projects/app/utils/parser.py. "
+            "Step 1: Find the function parse_date(s: str). "
+            "Step 2: Add handling for ISO 8601 format (YYYY-MM-DDTHH:MM:SS). "
+            "Step 3: Return the complete updated function as a Python code block.' "
+            "Example BAD prompt: 'Fix the date parser.'"
+        ),
+    ),
+    session_id: str = Field(
+        default="",
+        description=(
+            "Resume a previous Qwen session by its ID (from a prior qwen_prompt response). "
+            "Leave empty to start a fresh session. "
+            "Pass the same session_id on every subsequent turn of a multi-turn conversation. "
+            "Qwen persists session history to disk when --chat-recording is enabled (always on here)."
+        ),
+    ),
+    model: str = Field(
+        default="",
+        description=(
+            "Qwen model to use. Leave empty to use the CLI's default model (recommended). "
+            "The default model is determined by your auth tier: "
+            "Free OAuth tier uses the latest Qwen coder model automatically. "
+            "To specify explicitly, use values like 'qwen-plus', 'qwen-max', 'qwen-turbo'. "
+            "Use 'qwen-max' for complex reasoning tasks, 'qwen-turbo' for fast bulk tasks."
+        ),
+    ),
+    timeout_seconds: int = Field(
+        default=120,
+        description=(
+            "Seconds to wait for a response. "
+            "Increase to 300 for long multi-step tasks."
+        ),
+    ),
+    project_dir: str = Field(
+        default="",
+        description=(
+            "Absolute path to the working directory for this call. "
+            "Set this when your prompt references files in a specific project. "
+            "Example: 'C:/Users/User/projects/myapp'. Defaults to current directory."
+        ),
+    ),
 ) -> dict[str, Any]:
-    """Send a prompt to Qwen Code CLI. Returns response, model used, and session_id. Pass session_id to continue a conversation."""
+    """
+    Send a detailed prompt to the Qwen Code CLI. Returns response text, model used, and session_id.
+
+    SESSION CONTINUITY:
+      First call returns a session_id. Pass it back on the next call to continue the conversation.
+      Qwen persists session history to disk — context is preserved across calls.
+
+    ALWAYS write detailed prompts. Include file paths, numbered steps, and output format.
+    Vague prompts produce vague results.
+    """
     try:
         return await handle_qwen_prompt(
             prompt=prompt,
@@ -241,7 +516,12 @@ async def qwen_prompt(
 
 @mcp.tool()
 async def opencode_shutdown() -> dict[str, Any]:
-    """Gracefully stop the opencode server and close all sessions."""
+    """
+    Gracefully stop the opencode server and close all active sessions.
+
+    Call this when you are done with all opencode work in the current session.
+    Gemini and Qwen CLI tools are not affected — they are stateless subprocesses.
+    """
     global _client
     try:
         result = await handle_shutdown(session_manager=_session_manager, process=_process)
