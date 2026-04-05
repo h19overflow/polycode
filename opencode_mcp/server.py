@@ -56,9 +56,9 @@ def _get_client() -> OpencodeClient:
     return _client
 
 
-def _wrap_error(err: OpencodeError) -> dict:
+def _wrap_error(err: OpencodeError) -> dict[str, Any]:
     logger.error("Tool error: %s — %s", type(err).__name__, err.message)
-    return format_error(err)
+    return dict(format_error(err))
 
 
 @mcp.tool()

@@ -4,8 +4,8 @@ Integration tests — require opencode binary on PATH and ollama running.
 Run with: pytest tests/test_integration.py -m integration -v
 """
 import pytest
-from opencode_mcp.opencode_process import OpencodeProcess
-from opencode_mcp.opencode_client import OpencodeClient
+from opencode_mcp.core.process import OpencodeProcess
+from opencode_mcp.core.client import OpencodeClient
 
 
 @pytest.fixture(scope="module")
