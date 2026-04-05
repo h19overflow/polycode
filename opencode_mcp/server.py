@@ -90,7 +90,7 @@ async def opencode_start_session(
 async def opencode_send_message(
     session_id: str = Field(description="Session ID from opencode_start_session"),
     message: str = Field(description="The prompt or message to send"),
-    timeout_seconds: int = Field(default=120, description="Seconds to wait for a response"),
+    timeout_seconds: int = Field(default=int(REQUEST_TIMEOUT), description="Seconds to wait for a response"),
 ) -> dict[str, Any]:
     """Send a message to an existing opencode session and return the response."""
     try:
