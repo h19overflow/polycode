@@ -20,28 +20,27 @@ class OpencodeClient:
         self._base_url = base_url
         self._timeout = request_timeout
         self._auth = auth
-
-    def _make_client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            base_url=self._base_url,
-            auth=self._auth,
-            timeout=self._timeout,
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            auth=auth,
+            timeout=request_timeout,
         )
 
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
     async def health_check(self) -> bool:
-        async with self._make_client() as client:
-            response = await client.get("/global/health")
-            data = response.json()
-            return bool(data.get("healthy", False))
+        response = await self._client.get("/global/health")
+        data = response.json()
+        return bool(data.get("healthy", False))
 
     async def create_session(self, title: str = "") -> str:
         payload: dict[str, Any] = {}
         if title:
             payload["title"] = title
-        async with self._make_client() as client:
-            response = await client.post("/session", json=payload)
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post("/session", json=payload)
+        response.raise_for_status()
+        data = response.json()
         if "id" not in data:
             raise OpencodeProtocolError(
                 message="opencode /session response missing 'id' field",
@@ -64,10 +63,9 @@ class OpencodeClient:
             payload["model"] = model
 
         try:
-            async with self._make_client() as client:
-                response = await client.post(f"/session/{session_id}/message", json=payload)
-                response.raise_for_status()
-                data = response.json()
+            response = await self._client.post(f"/session/{session_id}/message", json=payload)
+            response.raise_for_status()
+            data = response.json()
         except httpx.TimeoutException as exc:
             raise OpencodeTimeoutError(message=f"Request to opencode timed out after {self._timeout}s") from exc
 
@@ -89,10 +87,9 @@ class OpencodeClient:
         }
 
     async def list_models(self, provider: str = "ollama") -> list[str]:
-        async with self._make_client() as client:
-            response = await client.get("/provider")
-            response.raise_for_status()
-            providers = response.json()
+        response = await self._client.get("/provider")
+        response.raise_for_status()
+        providers = response.json()
 
         models = []
         for p in providers:
@@ -101,4 +98,6 @@ class OpencodeClient:
                     model_id = m.get("id", "")
                     if model_id:
                         models.append(f"{provider}/{model_id}")
+        if not models:
+            logger.debug("Provider '%s' not found in response. Available: %s", provider, [p.get("id") for p in providers])
         return models

@@ -2,7 +2,7 @@ import pytest
 import respx
 import httpx
 from opencode_mcp.opencode_client import OpencodeClient
-from opencode_mcp.errors import OpencodeProtocolError
+from opencode_mcp.errors import OpencodeProtocolError, OpencodeTimeoutError
 
 
 BASE_URL = "http://127.0.0.1:9999"
@@ -77,3 +77,13 @@ async def test_health_check_returns_true_when_healthy(client):
     )
     result = await client.health_check()
     assert result is True
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_send_message_raises_timeout_error(client):
+    respx.post(f"{BASE_URL}/session/sess-abc/message").mock(
+        side_effect=httpx.TimeoutException("timed out")
+    )
+    with pytest.raises(OpencodeTimeoutError):
+        await client.send_message(session_id="sess-abc", message="Hello")
