@@ -121,7 +121,7 @@ class OpencodeProcess:
                     if response.status_code == 200:
                         logger.info("opencode server is healthy at %s", self.base_url)
                         return
-                except httpx.ConnectError:
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout):
                     pass
                 await asyncio.sleep(0.5)
 
