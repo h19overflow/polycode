@@ -6,6 +6,7 @@ from typing import Any
 
 from opencode_mcp.core.client import OpencodeClient
 from opencode_mcp.core.process import OpencodeProcess
+from opencode_mcp.helpers.cli_runner import run_gemini_prompt, run_qwen_prompt
 from opencode_mcp.helpers.models import list_all_models
 from opencode_mcp.helpers.validation import validate_model_format
 from opencode_mcp.session_manager import SessionManager
@@ -81,6 +82,32 @@ async def handle_set_model(model: str, state: dict[str, Any]) -> dict[str, Any]:
     state["default_model"] = model
     logger.info("Default model changed from %s to %s", previous, model)
     return {"previous_model": previous, "new_model": model}
+
+
+async def handle_gemini_prompt(
+    prompt: str,
+    model: str | None,
+    timeout_seconds: int,
+    project_dir: str | None,
+) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: run_gemini_prompt(prompt, model, float(timeout_seconds), project_dir),
+    )
+
+
+async def handle_qwen_prompt(
+    prompt: str,
+    model: str | None,
+    timeout_seconds: int,
+    project_dir: str | None,
+) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: run_qwen_prompt(prompt, model, float(timeout_seconds), project_dir),
+    )
 
 
 async def handle_shutdown(
