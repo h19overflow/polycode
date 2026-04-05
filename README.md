@@ -123,6 +123,90 @@ You never have to start or stop anything manually.
 
 ---
 
+## Gemini CLI Setup
+
+**Config file:** `~/.gemini/settings.json` (user-level) or `.gemini/settings.json` (project-level)
+
+**macOS / Linux:**
+```json
+{
+  "mcpServers": {
+    "opencode": {
+      "command": "opencode-mcp",
+      "env": {
+        "OPENCODE_DEFAULT_MODEL": "ollama/qwen3.5:cloud"
+      }
+    }
+  }
+}
+```
+
+**Windows** — use the full path (find it with `where opencode-mcp`):
+```json
+{
+  "mcpServers": {
+    "opencode": {
+      "command": "C:\\Users\\YourName\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\opencode-mcp.exe",
+      "env": {
+        "OPENCODE_DEFAULT_MODEL": "ollama/qwen3.5:cloud"
+      }
+    }
+  }
+}
+```
+
+Restart Gemini CLI after saving. Verify with `/mcp list` — `opencode` should appear as connected.
+
+---
+
+## Qwen Code Setup
+
+**Qwen Code** ([QwenLM/qwen-code](https://github.com/QwenLM/qwen-code)) is Alibaba's coding CLI, a fork of Gemini CLI tuned for Qwen models.
+
+**Config file:** `~/.qwen/settings.json` (user-level) or `.qwen/settings.json` (project-level)
+
+**macOS / Linux:**
+```json
+{
+  "mcpServers": {
+    "opencode": {
+      "command": "opencode-mcp",
+      "env": {
+        "OPENCODE_DEFAULT_MODEL": "ollama/qwen3.5:cloud"
+      }
+    }
+  }
+}
+```
+
+**Windows** — use the full path:
+```json
+{
+  "mcpServers": {
+    "opencode": {
+      "command": "C:\\Users\\YourName\\AppData\\Local\\Programs\\Python\\Python313\\Scripts\\opencode-mcp.exe",
+      "env": {
+        "OPENCODE_DEFAULT_MODEL": "ollama/qwen3.5:cloud"
+      }
+    }
+  }
+}
+```
+
+Optionally restrict which MCP servers are active with the `mcp.allowed` list:
+```json
+{
+  "mcpServers": { ... },
+  "mcp": {
+    "allowed": ["opencode"]
+  }
+}
+```
+
+Restart Qwen Code after saving. The `opencode_*` tools will appear automatically.
+
+---
+
 ## Using the Tools
 
 ### Typical workflow
