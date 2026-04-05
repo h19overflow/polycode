@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+import logging
+import os
+from typing import Any
+
+import fastmcp
+from pydantic import Field
+
+from opencode_mcp.errors import OpencodeError, format_error
+from opencode_mcp.opencode_client import OpencodeClient
+from opencode_mcp.opencode_process import OpencodeProcess
+from opencode_mcp.session_manager import SessionManager
+from opencode_mcp.tools import (
+    handle_end_session,
+    handle_get_history,
+    handle_list_models,
+    handle_list_sessions,
+    handle_send_message,
+    handle_set_model,
+    handle_shutdown,
+    handle_start_session,
+)
+
+logging.basicConfig(
+    level=os.getenv("OPENCODE_LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+DEFAULT_MODEL = os.getenv("OPENCODE_DEFAULT_MODEL", "ollama/qwen3.5:cloud")
+PORT = int(os.getenv("OPENCODE_PORT", "0"))
+STARTUP_TIMEOUT = float(os.getenv("OPENCODE_STARTUP_TIMEOUT", "10"))
+REQUEST_TIMEOUT = float(os.getenv("OPENCODE_REQUEST_TIMEOUT", "120"))
+
+mcp = fastmcp.FastMCP("opencode-mcp")
+
+_process = OpencodeProcess(
+    model=DEFAULT_MODEL,
+    port=PORT,
+    startup_timeout=STARTUP_TIMEOUT,
+)
+_session_manager = SessionManager()
+_state: dict[str, Any] = {"default_model": DEFAULT_MODEL}
+_client: OpencodeClient | None = None
+
+
+def _get_client() -> OpencodeClient:
+    global _client
+    if _client is None:
+        _client = OpencodeClient(
+            base_url=_process.base_url,
+            request_timeout=REQUEST_TIMEOUT,
+            auth=_process.auth,
+        )
+    return _client
+
+
+def _wrap_error(err: OpencodeError) -> dict:
+    logger.error("Tool error: %s — %s", type(err).__name__, err.message)
+    return format_error(err)
+
+
+@mcp.tool()
+async def opencode_start_session(
+    project_dir: str = Field(default="", description="Absolute path to the project directory. Defaults to current working directory."),
+    model: str = Field(default="", description="Model in 'provider/model' format. Defaults to OPENCODE_DEFAULT_MODEL."),
+) -> dict[str, Any]:
+    """Start a new opencode session. Returns session_id for use in subsequent calls."""
+    if not project_dir:
+        project_dir = os.getcwd()
+    if not model:
+        model = _state["default_model"]
+    if not _process.is_running:
+        await _process.start()
+    try:
+        return await handle_start_session(
+            project_dir=project_dir,
+            model=model,
+            session_manager=_session_manager,
+            client=_get_client(),
+            process=_process,
+            default_model=_state["default_model"],
+        )
+    except OpencodeError as err:
+        return _wrap_error(err)
+
+
+@mcp.tool()
+async def opencode_send_message(
+    session_id: str = Field(description="Session ID from opencode_start_session"),
+    message: str = Field(description="The prompt or message to send"),
+    timeout_seconds: int = Field(default=120, description="Seconds to wait for a response"),
+) -> dict[str, Any]:
+    """Send a message to an existing opencode session and return the response."""
+    try:
+        return await handle_send_message(
+            session_id=session_id,
+            message=message,
+            timeout_seconds=timeout_seconds,
+            session_manager=_session_manager,
+            client=_get_client(),
+        )
+    except OpencodeError as err:
+        return _wrap_error(err)
+
+
+@mcp.tool()
+async def opencode_get_history(
+    session_id: str = Field(description="Session ID to retrieve history for"),
+) -> dict[str, Any]:
+    """Return the full message history for a session."""
+    try:
+        return await handle_get_history(session_id=session_id, session_manager=_session_manager)
+    except OpencodeError as err:
+        return _wrap_error(err)
+
+
+@mcp.tool()
+async def opencode_list_sessions() -> dict[str, Any]:
+    """List all active opencode sessions."""
+    return await handle_list_sessions(session_manager=_session_manager)
+
+
+@mcp.tool()
+async def opencode_end_session(
+    session_id: str = Field(description="Session ID to close"),
+) -> dict[str, Any]:
+    """Close an opencode session and free its resources."""
+    try:
+        return await handle_end_session(session_id=session_id, session_manager=_session_manager)
+    except OpencodeError as err:
+        return _wrap_error(err)
+
+
+@mcp.tool()
+async def opencode_list_models() -> dict[str, Any]:
+    """List all available models from the ollama provider."""
+    try:
+        result = await handle_list_models()
+        result["default_model"] = _state["default_model"]
+        return result
+    except OpencodeError as err:
+        return _wrap_error(err)
+
+
+@mcp.tool()
+async def opencode_set_model(
+    model: str = Field(description="Model in 'provider/model' format, e.g. 'ollama/qwen3.5:cloud'"),
+) -> dict[str, Any]:
+    """Change the default model used for new sessions."""
+    try:
+        return await handle_set_model(model=model, state=_state)
+    except OpencodeError as err:
+        return _wrap_error(err)
+
+
+@mcp.tool()
+async def opencode_shutdown() -> dict[str, Any]:
+    """Gracefully stop the opencode server and close all sessions."""
+    global _client
+    result = await handle_shutdown(session_manager=_session_manager, process=_process)
+    _client = None
+    return result
+
+
+def main() -> None:
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()
